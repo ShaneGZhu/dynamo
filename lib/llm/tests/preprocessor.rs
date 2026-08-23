@@ -1113,6 +1113,7 @@ mod context_length_validation {
 }
 
 mod embedding_without_chat_template {
+    use dynamo_llm::local_model::runtime_config::TokenizerBackend;
     use dynamo_llm::model_card::ModelDeploymentCard;
     use dynamo_llm::model_type::ModelType;
     use dynamo_llm::preprocessor::OpenAIPreprocessor;
@@ -1445,6 +1446,8 @@ mod embedding_without_chat_template {
                 mdc.prompt_formatter = None;
                 mdc.chat_template_file = None;
                 mdc.runtime_config.context_length = Some(case.max_model_len);
+                mdc.runtime_config.tokenizer_backend = Some(TokenizerBackend::Fastokens);
+                mdc.runtime_config.tokenizer_fallback_enabled = Some(false);
                 let preprocessor = OpenAIPreprocessor::new_for_embeddings(mdc).unwrap();
                 let request = embedding_request_with_options(
                     json!(fixture.text),

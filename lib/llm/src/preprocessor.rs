@@ -921,8 +921,8 @@ pub struct OpenAIPreprocessor {
     mdcsum: String,
     formatter: Arc<dyn OAIPromptFormatter>,
     tokenizer: Arc<dyn Tokenizer>,
-    /// Present only for token-input embedding pipelines. The two Hugging Face
-    /// tokenizer variants are initialized independently on demand.
+    /// Present only for token-input embedding pipelines. The two tokenizer
+    /// variants are initialized independently on demand.
     embedding_tokenizers: Option<EmbeddingTokenizerState>,
     model_info: Arc<dyn ModelInfo>,
     lora_name: Option<String>,

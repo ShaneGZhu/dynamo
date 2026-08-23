@@ -1238,7 +1238,7 @@ impl ModelDeploymentCard {
         &self,
         options: crate::tokenizers::TokenizerOptions,
     ) -> anyhow::Result<crate::tokenizers::Tokenizer> {
-        self.tokenizer_with_options(options, true)
+        self.tokenizer_with_options(options, options.add_special_tokens)
     }
 
     fn tokenizer_with_options(
