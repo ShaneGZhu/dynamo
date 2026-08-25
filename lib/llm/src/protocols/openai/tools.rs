@@ -442,7 +442,7 @@ mod tests {
         )
     }
 
-    /// DIS-2779: a named choice on a tool whose schema admits only `{}` must install no
+    /// GH-13789: a named choice on a tool whose schema admits only `{}` must install no
     /// guided-decoding constraint. With the constraint installed the backend grammar lets
     /// the model emit whitespace between the braces until `max_tokens`, and the arguments
     /// come back unparseable.
