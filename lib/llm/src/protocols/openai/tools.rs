@@ -92,7 +92,18 @@ pub fn get_json_schema_from_tools(
             let tools = tools.ok_or(ToolChoiceError::MissingTools)?;
             let tool = find_tool(tools, &named.function.name)
                 .ok_or_else(|| ToolChoiceError::ToolNotFound(named.function.name.clone()))?;
-            Ok(Some(clone_parameters(&tool.function)))
+            let parameters = clone_parameters(&tool.function);
+            if admits_only_empty_object(&parameters) {
+                // A schema whose only legal document is `{}` leaves the grammar with no
+                // required non-whitespace token after the opening brace. Backends compile
+                // JSON schemas with unbounded whitespace between tokens, so greedy decoding
+                // keeps choosing whitespace over the closing brace and runs to max_tokens,
+                // returning arguments that do not parse. A tool that takes no parameters has
+                // nothing to constrain, so install no constraint. `tool_choice=required` is
+                // unaffected because its wrapper always requires a `name` key next.
+                return Ok(None);
+            }
+            Ok(Some(parameters))
         }
         ChatCompletionToolChoiceOption::Required => {
             let tools = tools.ok_or(ToolChoiceError::MissingTools)?;
@@ -103,6 +114,44 @@ pub fn get_json_schema_from_tools(
 
 fn find_tool<'a>(tools: &'a [ChatCompletionTool], name: &str) -> Option<&'a ChatCompletionTool> {
     tools.iter().find(|tool| tool.function.name == name)
+}
+
+/// True when `schema` admits exactly one document, the empty object `{}`.
+///
+/// Only the fully closed, property-less object qualifies. Leaving `additionalProperties`
+/// unset admits other documents, and a schema with any property gives the grammar a
+/// required key to emit, so neither can stall. The keyword allowlist keeps an unfamiliar
+/// constraint from being read as "empty".
+fn admits_only_empty_object(schema: &Value) -> bool {
+    let Value::Object(map) = schema else {
+        return false;
+    };
+    if map.get("type").and_then(Value::as_str) != Some("object") {
+        return false;
+    }
+    if map.get("additionalProperties") != Some(&Value::Bool(false)) {
+        return false;
+    }
+    let properties_empty = match map.get("properties") {
+        None => true,
+        Some(Value::Object(properties)) => properties.is_empty(),
+        Some(_) => false,
+    };
+    if !properties_empty {
+        return false;
+    }
+    let required_empty = map
+        .get("required")
+        .is_none_or(|required| required.as_array().is_some_and(|list| list.is_empty()));
+    if !required_empty {
+        return false;
+    }
+    map.keys().all(|key| {
+        matches!(
+            key.as_str(),
+            "type" | "properties" | "required" | "additionalProperties" | "title" | "description"
+        )
+    })
 }
 
 fn clone_parameters(function: &FunctionObject) -> Value {
@@ -368,6 +417,109 @@ mod tests {
                 },
             },
         ]
+    }
+
+    fn zero_arg_tool(parameters: Value) -> Vec<ChatCompletionTool> {
+        vec![ChatCompletionTool {
+            r#type: ChatCompletionToolType::Function,
+            function: FunctionObject {
+                name: "get_server_time".to_string(),
+                description: Some("Get the current server time.".to_string()),
+                parameters: Some(parameters),
+                strict: None,
+            },
+        }]
+    }
+
+    fn named_choice(name: &str) -> ChatCompletionToolChoiceOption {
+        ChatCompletionToolChoiceOption::Named(
+            dynamo_protocols::types::ChatCompletionNamedToolChoice {
+                r#type: ChatCompletionToolType::Function,
+                function: dynamo_protocols::types::FunctionName {
+                    name: name.to_string(),
+                },
+            },
+        )
+    }
+
+    /// DIS-2779: a named choice on a tool whose schema admits only `{}` must install no
+    /// guided-decoding constraint. With the constraint installed the backend grammar lets
+    /// the model emit whitespace between the braces until `max_tokens`, and the arguments
+    /// come back unparseable.
+    #[test]
+    fn named_choice_on_closed_zero_arg_tool_installs_no_constraint() {
+        let tools = zero_arg_tool(json!({
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false,
+        }));
+        let schema =
+            get_json_schema_from_tools(Some(&named_choice("get_server_time")), Some(&tools), None)
+                .expect("schema");
+        assert_eq!(
+            schema, None,
+            "a schema admitting only the empty object must not be installed"
+        );
+    }
+
+    /// The escape hatch is deliberately narrow. Anything that admits more than `{}` keeps
+    /// its constraint, because the grammar then always has a required token to emit.
+    #[test]
+    fn named_choice_keeps_constraint_for_schemas_admitting_more_than_empty() {
+        let open = json!({"type": "object", "properties": {}});
+        let bare = json!({"type": "object"});
+        let with_property = json!({
+            "type": "object",
+            "properties": {"note": {"type": "string"}},
+            "required": [],
+            "additionalProperties": false,
+        });
+        let unknown_keyword = json!({
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false,
+            "minProperties": 0,
+        });
+
+        for parameters in [open, bare, with_property, unknown_keyword] {
+            let tools = zero_arg_tool(parameters.clone());
+            let schema = get_json_schema_from_tools(
+                Some(&named_choice("get_server_time")),
+                Some(&tools),
+                None,
+            )
+            .expect("schema");
+            assert_eq!(
+                schema,
+                Some(parameters.clone()),
+                "constraint should survive for {parameters}"
+            );
+        }
+    }
+
+    /// `tool_choice=required` wraps every tool with a required `name` key, so it can never
+    /// stall on whitespace and must keep its constraint even for a zero-argument tool.
+    #[test]
+    fn required_choice_on_closed_zero_arg_tool_keeps_constraint() {
+        let tools = zero_arg_tool(json!({
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false,
+        }));
+        let schema = get_json_schema_from_tools(
+            Some(&ChatCompletionToolChoiceOption::Required),
+            Some(&tools),
+            None,
+        )
+        .expect("schema")
+        .expect("required always installs a constraint");
+
+        let item = &schema["items"]["anyOf"][0];
+        assert_eq!(item["properties"]["name"]["enum"][0], "get_server_time");
+        assert_eq!(item["required"], json!(["name", "parameters"]));
     }
 
     #[test]
