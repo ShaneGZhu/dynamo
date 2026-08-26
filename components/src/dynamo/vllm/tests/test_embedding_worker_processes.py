@@ -10,9 +10,12 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
-from vllm.usage.usage_lib import UsageContext
 
-from dynamo.vllm import embedding_worker_processes as processes
+pytest.importorskip("vllm.usage.usage_lib")
+
+from vllm.usage.usage_lib import UsageContext  # noqa: E402
+
+from dynamo.vllm import embedding_worker_processes as processes  # noqa: E402
 
 pytestmark = [
     pytest.mark.unit,

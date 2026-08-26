@@ -727,19 +727,24 @@ def setup_vllm_engine(
 
     logger.info(f"VllmWorker for {config.served_model_name} has been initialized")
 
-    engine_cleanup_resource = prometheus_temp_dir
+    embedding_cleanup_resource: EmbeddingEngineCleanupResource | None = None
     if embedding_process_group is not None:
-        engine_cleanup_resource = EmbeddingEngineCleanupResource(
+        embedding_cleanup_resource = EmbeddingEngineCleanupResource(
             embedding_process_group,
             prometheus_temp_dir,
         )
+    engine_cleanup_resource = (
+        embedding_cleanup_resource
+        if embedding_cleanup_resource is not None
+        else prometheus_temp_dir
+    )
 
     # The shared embedding EngineCore is already running at this point, so make
     # startup failure transactional and do not leave child endpoints behind.
     try:
         runtime_values = get_engine_cache_info(engine_client)
     except BaseException:
-        if embedding_process_group is not None:
+        if embedding_cleanup_resource is not None:
             try:
                 engine_client.shutdown()
             except Exception:
@@ -747,7 +752,7 @@ def setup_vllm_engine(
                     "Failed to shut down parent embedding client after startup error"
                 )
             try:
-                engine_cleanup_resource.cleanup()
+                embedding_cleanup_resource.cleanup()
             except Exception:
                 logger.exception(
                     "Failed to clean up shared embedding EngineCore after startup error"
