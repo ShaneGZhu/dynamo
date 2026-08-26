@@ -1,0 +1,30 @@
+{
+  "name": "dsh-dynamo-client-lock",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@11.7.0",
+  "scripts": {
+    "test": "node --test test_deepseek_harness_support.mjs test_drive_deepseek_harness_acp.mjs",
+    "test:support": "node --test test_deepseek_harness_support.mjs",
+    "test:persistent": "node --test test_drive_deepseek_harness_acp.mjs"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "0.25.1",
+    "@deepseek-ai/dsh": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-acp": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-acp-demo": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-app-boot": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-bash-sandbox": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-compaction-basic": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-fs-observation-policy": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-fs-sandbox": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-llm-deepseek": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-sandbox-local": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-sandbox-policy": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-subprocess-local": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-token-meter": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-tool-fs": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-user-approval": "0.1.0-rc.8"
+  }
+}
