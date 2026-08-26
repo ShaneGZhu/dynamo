@@ -8544,9 +8544,7 @@ mod tests {
             default_prompt.as_str()
         );
         assert!(
-            continue_prompt
-                .as_str()
-                .ends_with("LLM-Native Interaction"),
+            continue_prompt.as_str().ends_with("LLM-Native Interaction"),
             "continue_final_message should leave the last assistant open, got {:?}",
             continue_prompt.as_str()
         );
