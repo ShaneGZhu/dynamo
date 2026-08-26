@@ -351,10 +351,32 @@ def test_sglang_extract_slices_cumulative_array():
     meta = {
         "output_token_logprobs": [(-0.1, 1, "a"), (-0.2, 2, "b"), (-0.3, 3, "c")],
     }
-    log_probs, top_logprobs, new_total = extract_from_sglang_meta(meta, 1)
+    log_probs, top_logprobs, new_total = extract_from_sglang_meta(
+        meta, 1, num_output_tokens_in_chunk=2
+    )
     assert log_probs == [-0.2, -0.3]
     assert top_logprobs is None
     assert new_total == 3
+
+
+def test_sglang_extract_accepts_incremental_array_after_prior_chunk():
+    meta = {
+        "output_token_logprobs": [(-0.2, 2, "b")],
+        "output_top_logprobs": [[(-0.2, 2, "b"), (-1.2, 20, "B")]],
+    }
+
+    log_probs, top_logprobs, new_total = extract_from_sglang_meta(
+        meta, 1, num_output_tokens_in_chunk=1
+    )
+
+    assert log_probs == [-0.2]
+    assert top_logprobs == [
+        [
+            {"rank": 1, "token_id": 2, "token": "b", "logprob": -0.2},
+            {"rank": 2, "token_id": 20, "token": "B", "logprob": -1.2},
+        ]
+    ]
+    assert new_total == 2
 
 
 def test_sglang_extract_with_top():

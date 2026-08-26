@@ -907,6 +907,40 @@ async def test_process_token_stream_tracks_logprobs_per_choice_index():
 
 
 @pytest.mark.asyncio
+async def test_process_token_stream_preserves_incremental_logprobs_after_interval():
+    handler = _new_decode_handler()
+    stream_items = []
+    for chunk_index in range(4):
+        first_token = chunk_index * 30
+        output_ids = list(range(first_token, first_token + 30))
+        stream_items.append(
+            {
+                "index": 0,
+                "output_ids": output_ids,
+                "meta_info": {
+                    "id": "request-1",
+                    "finish_reason": None,
+                    "output_token_logprobs": [
+                        (-0.1, token_id, f"token-{token_id}") for token_id in output_ids
+                    ],
+                    "output_top_logprobs": [
+                        [(-0.1, token_id, f"token-{token_id}")]
+                        for token_id in output_ids
+                    ],
+                },
+            }
+        )
+
+    chunks = await _collect(
+        handler._process_token_stream(_stream(stream_items), _Context())
+    )
+
+    assert [len(chunk["log_probs"]) for chunk in chunks] == [30, 30, 30, 30]
+    assert [len(chunk["top_logprobs"]) for chunk in chunks] == [30, 30, 30, 30]
+    assert sum(len(chunk["log_probs"]) for chunk in chunks) == 120
+
+
+@pytest.mark.asyncio
 async def test_process_token_stream_uploads_large_metadata(tmp_path):
     handler = _new_decode_handler()
     uploader = MetadataUploader(

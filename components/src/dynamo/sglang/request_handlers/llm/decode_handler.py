@@ -331,11 +331,14 @@ class DecodeWorkerHandler(BaseWorkerHandler):
     def _extract_logprobs(
         meta_info: Dict[str, Any],
         num_output_logprobs_so_far: int,
+        *,
+        num_output_tokens_in_chunk: int | None = None,
         return_tokens_as_token_ids: bool = False,
     ) -> tuple:
         return _shared_logprobs.extract_from_sglang_meta(
             meta_info,
             num_output_logprobs_so_far,
+            num_output_tokens_in_chunk=num_output_tokens_in_chunk,
             return_tokens_as_token_ids=return_tokens_as_token_ids,
         )
 
@@ -529,10 +532,9 @@ class DecodeWorkerHandler(BaseWorkerHandler):
         """
         # Use Future pattern for request ID - will be set when first response arrives
         request_id_future: asyncio.Future[str] = asyncio.Future()
-        # SGLang's token stream is asymmetric: output_ids are disjoint deltas
-        # when stream_output=True, but meta_info output logprobs are cumulative.
-        # With n>1, chunks for different choices are interleaved, so track the
-        # cumulative-logprob cursor per choice index instead of globally.
+        # SGLang output_ids are disjoint deltas. Logprob metadata is cumulative
+        # on some releases and incremental on others, so retain a per-choice
+        # cursor while also passing each chunk's token count to the extractor.
         output_logprobs_per_choice: dict[int, int] = {}
         async with self._cancellation_monitor(request_id_future, context):
             async for res in stream_source:
@@ -585,6 +587,7 @@ class DecodeWorkerHandler(BaseWorkerHandler):
                     ) = self._extract_logprobs(
                         meta_info,
                         output_logprobs_per_choice.get(output_idx, 0),
+                        num_output_tokens_in_chunk=len(output_ids),
                         return_tokens_as_token_ids=return_tokens_as_token_ids,
                     )
                     output_logprobs_per_choice[output_idx] = next_logprobs_total
