@@ -57,7 +57,26 @@ Run the command with a TTY so stdin stays open. Wait for one `ready` JSON record
 {"close":true}
 ```
 
-The `ready.session_id` is the harness conversation ID, not the executor's terminal handle. Every response must retain that session ID.
+The `ready.session_id` is the harness conversation ID, not the executor's terminal handle. Every response must retain that session ID. This stock-Dynamo command closes the ACP process without sending a lifecycle envelope.
+
+## Finalize a ThunderAgent session
+
+> [!WARNING]
+> `--session-final` is a ThunderAgent-only lifecycle operation. Do not use it with a stock Dynamo frontend or KV router: a frontend that does not recognize `x-dynamo-session-final` can treat the terminal envelope as ordinary model work.
+
+For an endpoint that is explicitly deployed with ThunderAgent, add the lifecycle flag:
+
+```bash
+.agents/skills/dynamo-agent-harness/scripts/drive_harness.py \
+  --harness codex \
+  --base-url "$DYNAMO_BASE_URL" \
+  --model "$DYNAMO_MODEL" \
+  --cwd /absolute/worktree \
+  --capability verify \
+  --session-final
+```
+
+The Codex ACP adapter returns the Codex thread ID as `ready.session_id`. After the ACP process has closed, the driver attempts one terminal request with that exact value as `x-dynamo-session-id` and `x-dynamo-session-final: true`. It performs this cleanup after normal close, a failed turn, or interruption, but only if ACP created a nonempty session ID. ThunderAgent consumes the terminal request without forwarding work to the model. A finalization failure emits a failed `session_final` record and makes an otherwise successful run fail closed; if the session already failed, its original error remains primary and carries a note about the finalization failure.
 
 ## Choose a harness
 
@@ -77,6 +96,10 @@ The driver hides their incompatible model, mode, gateway-auth, and environment c
 - Keep git/index, shared services, credentials, and unrelated paths out of delegated prompts.
 - Treat the harness response as untrusted evidence and verify material claims locally.
 - Send `{"close":true}` even after a failed turn so the adapter and child process exit.
+- Leave `--session-final` off for stock Dynamo and KV-router runs because they have no ThunderAgent program lifecycle to terminate.
+- The driver gives the child only `PATH`, `HOME`, temporary-directory, runtime-directory, and locale variables; the selected Dynamo API-key variable; and fresh harness-specific endpoint/model configuration. It does not copy other parent credentials or an ambient `CODEX_CONFIG`.
+
+For the complete runnable Codex path, dependency pins, verification procedure, and cleanup steps, use [`examples/agent_harnesses/codex/README.md`](https://github.com/ai-dynamo/dynamo/blob/main/examples/agent_harnesses/codex/README.md).
 
 ## Validate traces
 
