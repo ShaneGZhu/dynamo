@@ -28,6 +28,16 @@ aggregated vs. disaggregated serving, KV-aware routing, or embedding cache.
 Use this guide when you need to benchmark a custom DGD, compare arbitrary HTTP
 endpoints, or adapt an existing recipe to your own environment.
 
+## Qualify Agent Harnesses
+
+For an agent-harness qualification, deploy a supported Kubernetes recipe first and record its revision, resolved configuration, root OpenAI-compatible endpoint, exact served model, topology, and cache and routing settings. Treat the endpoint and model as inputs to qualification instead of duplicating deployment logic in each harness.
+
+Validate persistent harness behavior with the real harness, including multiple prompts on one session, tool and compaction behavior as applicable, errors, cancellation, and terminal cleanup. Use the public AIPerf flow in this guide to validate endpoint readiness and measure capacity; those measurements do not replace real-harness lifecycle checks.
+
+For routing comparisons, keep the model, workload, deployment capacity, cache configuration, client placement, and warmup policy fixed across matched treatments. Require request-level attribution from the client through the router and selected worker to GPU telemetry before making routing or utilization claims.
+
+Synthetic Chat Completions traffic can reproduce request shapes and concurrency, but it does not prove agent task quality, native harness semantics, tool correctness, or persistent-session behavior.
+
 ## Choosing Your Benchmarking Approach
 
 **Client-side** runs benchmarks on your local machine via port-forwarding. **Server-side** runs benchmarks directly within the Kubernetes cluster using internal service URLs.
