@@ -42,6 +42,43 @@ When the endpoint requires authentication, export `DYNAMO_API_KEY` and add `-H "
     Dynamo maps Codex's `thread-id` header to `session_id`. A spawned child thread also sends `x-codex-parent-thread-id`, which Dynamo maps to `parent_session_id`.
 
   </Tab>
+  <Tab title="Omnigent">
+
+    Omnigent is an open-source meta-harness that can run Codex against an OpenAI-compatible gateway. Install the qualified release, then use `omnigent setup` to add a Gateway credential for Codex. Set its base URL to the Dynamo recipe endpoint with `/v1` appended and use the recipe's API key, or any nonempty value for an unauthenticated local endpoint.
+
+    ```bash
+    uv tool install --python 3.12 'omnigent==0.11.0'
+    omnigent setup
+    ```
+
+    Create an agent file with an explicit platform sandbox:
+
+    ```yaml
+    name: dynamo-codex
+    prompt: Use tools to verify claims before answering.
+    executor:
+      harness: codex
+      model: your-recipe-served-model
+    os_env:
+      type: caller_process
+      cwd: /absolute/worktree
+      sandbox:
+        type: auto
+    ```
+
+    Replace the model and workspace values, then run one bounded task:
+
+    ```bash
+    omnigent run ./dynamo-codex.yaml \
+      --server local \
+      --harness codex \
+      --model "$DYNAMO_MODEL" \
+      -p 'Inspect one file and report one verified fact. Do not modify files.'
+    ```
+
+    Codex sends streaming `/v1/responses` requests with `thread-id`, which Dynamo normalizes as the session ID. This path uses Omnigent's public CLI and agent-file interfaces; it does not use Dynamo's ACP driver or a repository helper. The runbook is stock-Dynamo only, and a one-command run does not prove persistent main-thread reuse. Run it in a dedicated environment if cleanup requires `omnigent stop`, because that command stops all local Omnigent processes. See the [Omnigent well-lit path](https://github.com/ai-dynamo/dynamo/blob/main/examples/agent_harnesses/omnigent/README.md) for verification and cleanup boundaries.
+
+  </Tab>
   <Tab title="Pi">
 
     Pi uses the Dynamo provider plugin. Build and install it from the [agent-plugins](https://github.com/ai-dynamo/agent-plugins/tree/main/pi-plugin) checkout:
