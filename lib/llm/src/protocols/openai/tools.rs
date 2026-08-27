@@ -29,6 +29,13 @@ pub(crate) enum ToolChoiceValidation<'a> {
     Named(&'a str),
 }
 
+/// The guided-decoding grammar selected for a forced tool choice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolChoiceGuidance {
+    Json(Value),
+    Regex(String),
+}
+
 /// Validate the forced-choice contract shared by wire and parser-facing tool types.
 pub(crate) fn validate_tool_choice_against_names<'a>(
     tool_choice: ToolChoiceValidation<'_>,
@@ -75,12 +82,12 @@ pub(crate) fn validate_openai_tool_choice(
     }
 }
 
-/// Builds the JSON schema enforced by Guided Decoding for the given tool_choice/tools pair.
-pub fn get_json_schema_from_tools(
+/// Builds the guided-decoding grammar enforced for the given tool_choice/tools pair.
+pub fn get_tool_choice_guidance_from_tools(
     tool_choice: Option<&ChatCompletionToolChoiceOption>,
     tools: Option<&[ChatCompletionTool]>,
     parallel_tool_calls: Option<bool>,
-) -> Result<Option<Value>, ToolChoiceError> {
+) -> Result<Option<ToolChoiceGuidance>, ToolChoiceError> {
     let Some(choice) = tool_choice else {
         return Ok(None);
     };
@@ -94,22 +101,39 @@ pub fn get_json_schema_from_tools(
                 .ok_or_else(|| ToolChoiceError::ToolNotFound(named.function.name.clone()))?;
             let parameters = clone_parameters(&tool.function);
             if admits_only_empty_object(&parameters) {
-                // A schema whose only legal document is `{}` leaves the grammar with no
-                // required non-whitespace token after the opening brace. Backends compile
-                // JSON schemas with unbounded whitespace between tokens, so greedy decoding
-                // keeps choosing whitespace over the closing brace and runs to max_tokens,
-                // returning arguments that do not parse. A tool that takes no parameters has
-                // nothing to constrain, so install no constraint. `tool_choice=required` is
-                // unaffected because its wrapper always requires a `name` key next.
-                return Ok(None);
+                // JSON schemas allow whitespace between tokens. For the single-value `{}`
+                // schema, greedy decoding can therefore emit whitespace until max_tokens.
+                // Keep the named-tool constraint and make the only legal argument value exact.
+                return Ok(Some(ToolChoiceGuidance::Regex(r"\{\}".to_string())));
             }
-            Ok(Some(parameters))
+            Ok(Some(ToolChoiceGuidance::Json(parameters)))
         }
         ChatCompletionToolChoiceOption::Required => {
             let tools = tools.ok_or(ToolChoiceError::MissingTools)?;
-            build_required_schema(tools, parallel_tool_calls).map(Some)
+            build_required_schema(tools, parallel_tool_calls)
+                .map(ToolChoiceGuidance::Json)
+                .map(Some)
         }
     }
+}
+
+/// Builds the JSON-schema branch of the guided-decoding grammar.
+///
+/// Callers that install guided decoding should use `get_tool_choice_guidance_from_tools`
+/// so named zero-argument tools retain their exact regex constraint.
+pub fn get_json_schema_from_tools(
+    tool_choice: Option<&ChatCompletionToolChoiceOption>,
+    tools: Option<&[ChatCompletionTool]>,
+    parallel_tool_calls: Option<bool>,
+) -> Result<Option<Value>, ToolChoiceError> {
+    Ok(
+        get_tool_choice_guidance_from_tools(tool_choice, tools, parallel_tool_calls)?.and_then(
+            |guidance| match guidance {
+                ToolChoiceGuidance::Json(schema) => Some(schema),
+                ToolChoiceGuidance::Regex(_) => None,
+            },
+        ),
+    )
 }
 
 fn find_tool<'a>(tools: &'a [ChatCompletionTool], name: &str) -> Option<&'a ChatCompletionTool> {
@@ -442,24 +466,26 @@ mod tests {
         )
     }
 
-    /// GH-13789: a named choice on a tool whose schema admits only `{}` must install no
-    /// guided-decoding constraint. With the constraint installed the backend grammar lets
-    /// the model emit whitespace between the braces until `max_tokens`, and the arguments
-    /// come back unparseable.
+    /// GH-13789: a named choice on a tool whose schema admits only `{}` needs an exact regex.
+    /// JSON-schema whitespace can otherwise run to `max_tokens` before the closing brace.
     #[test]
-    fn named_choice_on_closed_zero_arg_tool_installs_no_constraint() {
+    fn named_choice_on_closed_zero_arg_tool_uses_exact_regex() {
         let tools = zero_arg_tool(json!({
             "type": "object",
             "properties": {},
             "required": [],
             "additionalProperties": false,
         }));
-        let schema =
-            get_json_schema_from_tools(Some(&named_choice("get_server_time")), Some(&tools), None)
-                .expect("schema");
+        let guidance = get_tool_choice_guidance_from_tools(
+            Some(&named_choice("get_server_time")),
+            Some(&tools),
+            None,
+        )
+        .expect("guidance");
         assert_eq!(
-            schema, None,
-            "a schema admitting only the empty object must not be installed"
+            guidance,
+            Some(ToolChoiceGuidance::Regex(r"\{\}".to_string())),
+            "a schema admitting only the empty object needs an exact constraint"
         );
     }
 

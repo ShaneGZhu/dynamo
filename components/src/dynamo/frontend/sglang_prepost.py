@@ -28,6 +28,8 @@ from sglang.srt.parser.jinja_template_utils import (
 )
 from sglang.srt.parser.reasoning_parser import ReasoningParser
 
+from dynamo.common.utils.guided_json import admits_only_empty_object
+
 from .thinking import apply_default_thinking_mode_to_template_kwargs
 from .utils import PreprocessError, random_call_id
 
@@ -607,6 +609,10 @@ def build_tool_call_guided_decoding(
 
     if isinstance(constraint, tuple) and len(constraint) == 2:
         if constraint[0] == "json_schema":
+            if _is_named_tool_choice(tool_choice) and admits_only_empty_object(
+                constraint[1]
+            ):
+                return {"regex": r"\{\}"}
             return {"json": constraint[1]}
         if constraint[0] == "structural_tag":
             tag_value = constraint[1]
