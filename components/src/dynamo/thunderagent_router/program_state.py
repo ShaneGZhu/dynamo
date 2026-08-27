@@ -35,6 +35,11 @@ class Program:
     lifecycle: ProgramLifecycle = ProgramLifecycle.ACTIVE
 
     assigned_worker_id: Optional[int] = None
+    # The other half of the sticky pin. Learned from the first response chunk;
+    # never inferred from capacity: the model deployment card is per-instance,
+    # so a capacity snapshot cannot yield a rank. None means "not yet pinnable",
+    # not "rank 0".
+    assigned_dp_rank: Optional[int] = None
 
     token_total: int = 0
 
@@ -59,6 +64,7 @@ class RequestSnapshot:
     status: ProgramStatus
     lifecycle: ProgramLifecycle
     assigned_worker_id: Optional[int]
+    assigned_dp_rank: Optional[int]
     token_total: int
     step_count: int
     marked_for_pause: bool
@@ -101,6 +107,7 @@ class ProgramTable:
             status=program.status,
             lifecycle=program.lifecycle,
             assigned_worker_id=program.assigned_worker_id,
+            assigned_dp_rank=program.assigned_dp_rank,
             token_total=program.token_total,
             step_count=program.step_count,
             marked_for_pause=program.marked_for_pause,
@@ -127,6 +134,7 @@ class ProgramTable:
         program.status = snapshot.status
         program.lifecycle = snapshot.lifecycle
         program.assigned_worker_id = snapshot.assigned_worker_id
+        program.assigned_dp_rank = snapshot.assigned_dp_rank
         program.token_total = snapshot.token_total
         program.step_count = snapshot.step_count
         program.marked_for_pause = snapshot.marked_for_pause

@@ -31,6 +31,9 @@ class WorkerCapacityProvider:
         # Cache parsed cards keyed on the raw JSON string so a subsequent
         # snapshot() call avoids re-parsing on the request hot path.
         self._parsed: dict[str, Optional[int]] = {}
+        # Same card, different field; separate cache to avoid evicting pool-token
+        # entries when dp_size_for_worker is called and vice versa.
+        self._parsed_dp_size: dict[str, Optional[int]] = {}
 
     def start(self) -> None:
         if self._subscriber is not None:
@@ -75,6 +78,41 @@ class WorkerCapacityProvider:
         except Exception as exc:
             logger.debug("WorkerCapacityProvider liveness snapshot error: %s", exc)
             return set()
+
+    def dp_size_for_worker(self, worker_id: int) -> Optional[int]:
+        """Return the number of DP ranks owned by *worker_id*; None if unknown.
+
+        A worker with exactly 1 rank can be pinned by worker id alone — the
+        router will fill in the rank via ``unique_dp_rank_for_worker``. Any
+        other value requires an explicit rank in the pin, so callers must treat
+        an unknown result as "more than 1", not as "1".
+        """
+        if self._subscriber is None:
+            return None
+        try:
+            cards = self._subscriber.get_model_cards()
+        except Exception as exc:
+            logger.debug("WorkerCapacityProvider dp_size lookup error: %s", exc)
+            return None
+        card_json = cards.get(str(worker_id))
+        if card_json is None:
+            return None
+        return self._parse_dp_size(card_json)
+
+    def _parse_dp_size(self, card_json: str) -> Optional[int]:
+        if card_json in self._parsed_dp_size:
+            return self._parsed_dp_size[card_json]
+        result: Optional[int] = None
+        try:
+            card = json.loads(card_json)
+        except json.JSONDecodeError:
+            card = None
+        if isinstance(card, dict):
+            dp_size = (card.get("runtime_config") or {}).get("data_parallel_size")
+            if isinstance(dp_size, int) and dp_size > 0:
+                result = dp_size
+        self._parsed_dp_size[card_json] = result
+        return result
 
     def _parse_pool_tokens(self, card_json: str) -> Optional[int]:
         if card_json in self._parsed:

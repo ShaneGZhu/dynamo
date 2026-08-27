@@ -36,6 +36,9 @@ class PauseDecision:
     was_paused: bool = False
     was_soft_demoted: bool = False
     assigned_worker_hint: Optional[int] = None
+    # Only meaningful together with assigned_worker_hint. None means the pin
+    # cannot be expressed this turn; the request must go out without a pin.
+    assigned_dp_rank_hint: Optional[int] = None
 
 
 @dataclass
@@ -185,6 +188,7 @@ class ThunderAgentScheduler:
                     was_paused=was_paused,
                     was_soft_demoted=soft_demoted,
                     assigned_worker_hint=program.assigned_worker_id,
+                    assigned_dp_rank_hint=program.assigned_dp_rank,
                 )
         except asyncio.CancelledError:
             # Admission mutates shared state before the first cancellable wait.
@@ -269,6 +273,7 @@ class ThunderAgentScheduler:
                 return None, False
             stale_worker_id = program.assigned_worker_id
             program.assigned_worker_id = None
+            program.assigned_dp_rank = None
             needs_assignment = True
             stale_replacement = True
             logger.info(
@@ -303,6 +308,10 @@ class ThunderAgentScheduler:
         )
         if worker_id is not None:
             program.assigned_worker_id = worker_id
+            # Capacity is per-instance; this selection carries no rank. Leave it
+            # None so the request goes out without a pin: the first response chunk
+            # will tell us the real (worker_id, dp_rank) for subsequent turns.
+            program.assigned_dp_rank = None
             self._stat_worker_assignments += 1
             return None, False
 
@@ -348,11 +357,14 @@ class ThunderAgentScheduler:
         if do_pause:
             await self._pause_acting(program_id)
 
-    async def assign_worker(self, program_id: str, worker_id: int) -> None:
+    async def assign_worker(
+        self, program_id: str, worker_id: int, dp_rank: Optional[int] = None
+    ) -> None:
         async with self._lock:
             program = self._table.programs.get(program_id)
             if program is not None:
                 program.assigned_worker_id = worker_id
+                program.assigned_dp_rank = dp_rank
                 self._stat_worker_assignments += 1
 
     async def _scheduler_loop(self) -> None:
@@ -545,6 +557,7 @@ class ThunderAgentScheduler:
             return False
         program.lifecycle = ProgramLifecycle.PAUSED
         program.assigned_worker_id = None
+        program.assigned_dp_rank = None
         if program.waiting is None:
             program.waiting = asyncio.Event()
         else:
@@ -673,6 +686,9 @@ class ThunderAgentScheduler:
             return
         program.lifecycle = ProgramLifecycle.ACTIVE
         program.assigned_worker_id = target_worker_id
+        # Resume may land on a different instance; carrying the previous rank
+        # would pin to a replica that holds no KV blocks for this program.
+        program.assigned_dp_rank = None
         if target_worker_id is not None:
             self._stat_worker_assignments += 1
         notify = program.waiting
