@@ -116,7 +116,7 @@ thunderagent.route_selected program=<program_id> worker=<id> source=first_chunk
 ```text
 thunderagent.program created program=<program_id> ...
 thunderagent.program paused program=<program_id> reason=<admission_full|pressure> ...
-thunderagent.program resumed program=<program_id> worker=<id> ...
+thunderagent.program resumed program=<program_id> worker=<id> dp_rank=<rank> ...
 thunderagent.program terminated program=<program_id> ...
 ```
 
@@ -131,7 +131,7 @@ The scheduler also emits a per-tick INFO summary on each side of the control loo
 **Pause side** — logged when a worker pauses or marks any program in a tick:
 
 ```text
-scheduler.tick worker=<id> paused=<N> marked=<M> util=<X> -> <Y>
+scheduler.tick worker=<id> dp_rank=<rank> paused=<N> marked=<M> util=<X> -> <Y>
 ```
 
 `paused` is the number of ACTING programs paused this tick, `marked` is the number of REASONING programs marked for pause at their next tool boundary, and `util=X -> Y` is the worker utilization before and after the pause cycle.
