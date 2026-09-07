@@ -58,22 +58,73 @@ impl TcpClient {
         TcpClient { worker_id }
     }
 
+    /// Timeout for one dial attempt, from `DYN_TCP_RESPONSE_CONNECT_TIMEOUT` (seconds).
+    ///
+    /// Defaults to 5s, matching the request-plane pool's `DYN_TCP_CONNECT_TIMEOUT`.
+    /// Without a timeout the dial inherits the kernel SYN retry budget (~127s on Linux
+    /// defaults), so a saturated listener at the far end holds an ingress handler slot
+    /// for over two minutes per failure instead of failing fast enough for the caller
+    /// to see backpressure.
+    fn connect_timeout() -> Duration {
+        const DEFAULT_SECS: u64 = 5;
+        std::env::var(crate::config::environment_names::tcp_response_stream::DYN_TCP_RESPONSE_CONNECT_TIMEOUT)
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|secs| *secs > 0)
+            .map(Duration::from_secs)
+            .unwrap_or_else(|| Duration::from_secs(DEFAULT_SECS))
+    }
+
+    /// Cap on `AddrNotAvailable` retries, from `DYN_TCP_RESPONSE_CONNECT_RETRY_LIMIT`.
+    ///
+    /// `EADDRNOTAVAIL` is local ephemeral-port exhaustion. Retrying it without a bound
+    /// converts port pressure into a request that neither completes nor fails.
+    fn connect_retry_limit() -> usize {
+        const DEFAULT_RETRIES: usize = 5;
+        std::env::var(crate::config::environment_names::tcp_response_stream::DYN_TCP_RESPONSE_CONNECT_RETRY_LIMIT)
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(DEFAULT_RETRIES)
+    }
+
     async fn connect(address: &str) -> std::io::Result<TcpStream> {
         // try to connect to the address; retry with linear backoff if AddrNotAvailable
         let backoff = std::time::Duration::from_millis(200);
+        let connect_timeout = Self::connect_timeout();
+        let retry_limit = Self::connect_retry_limit();
+        let mut retries = 0usize;
         loop {
-            match TcpStream::connect(address).await {
-                Ok(socket) => {
+            match time::timeout(connect_timeout, TcpStream::connect(address)).await {
+                Ok(Ok(socket)) => {
                     socket.set_nodelay(true)?;
                     return Ok(socket);
                 }
-                Err(e) => {
-                    if e.kind() == std::io::ErrorKind::AddrNotAvailable {
-                        tracing::warn!("retry warning: failed to connect: {:?}", e);
+                Ok(Err(e)) => {
+                    if e.kind() == std::io::ErrorKind::AddrNotAvailable && retries < retry_limit {
+                        retries += 1;
+                        tracing::warn!(
+                            retries,
+                            retry_limit,
+                            "retry warning: failed to connect: {:?}",
+                            e
+                        );
                         tokio::time::sleep(backoff).await;
                     } else {
                         return Err(e);
                     }
+                }
+                Err(_elapsed) => {
+                    // Surfaced as TimedOut rather than the kernel's ETIMEDOUT so the
+                    // two are distinguishable in logs: this one means the listener did
+                    // not complete a handshake within our budget, which under load is a
+                    // full accept queue rather than an unreachable host.
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        format!(
+                            "connect to {address} timed out after {connect_timeout:?} \
+                             (response-stream dial; see DYN_TCP_RESPONSE_CONNECT_TIMEOUT)"
+                        ),
+                    ));
                 }
             }
         }

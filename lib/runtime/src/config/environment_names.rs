@@ -730,6 +730,31 @@ pub mod tcp_response_stream {
     /// If unset, the server auto-detects a routable local IP.
     pub const DYN_TCP_RESPONSE_STREAM_HOST: &str = "DYN_TCP_RESPONSE_STREAM_HOST";
 
+    /// `listen()` backlog for the TCP response stream server, i.e. the depth of the
+    /// kernel's completed-handshake queue for CallHome connections. Defaults to 4096.
+    ///
+    /// Every ingress opens one response-stream connection per request, so a loaded
+    /// fleet dials this listener at request rate rather than at connection rate.
+    /// `tokio::net::TcpListener::bind` hardcodes a backlog of 128; once that queue is
+    /// full the kernel drops SYNs silently, so the dialer sees no SYN-ACK and stalls in
+    /// `connect()` until its own SYN retries expire.
+    pub const DYN_TCP_RESPONSE_STREAM_BACKLOG: &str = "DYN_TCP_RESPONSE_STREAM_BACKLOG";
+
+    /// Timeout for one `connect()` attempt from the response-stream client, in seconds.
+    /// Defaults to 5, matching the request-plane pool's `DYN_TCP_CONNECT_TIMEOUT`.
+    ///
+    /// Unset, this dial inherits the kernel SYN retry budget (~127s on Linux defaults),
+    /// which keeps an ingress handler slot occupied for over two minutes per failure.
+    pub const DYN_TCP_RESPONSE_CONNECT_TIMEOUT: &str = "DYN_TCP_RESPONSE_CONNECT_TIMEOUT";
+
+    /// Maximum number of `AddrNotAvailable` retries when dialing a response stream.
+    /// Defaults to 5, about one second at the 200ms linear backoff.
+    ///
+    /// `EADDRNOTAVAIL` means local ephemeral ports are exhausted. Retrying forever turns
+    /// that into a request that neither completes nor fails.
+    pub const DYN_TCP_RESPONSE_CONNECT_RETRY_LIMIT: &str =
+        "DYN_TCP_RESPONSE_CONNECT_RETRY_LIMIT";
+
     /// TCP request-plane TLS configuration
     pub mod tls {
         /// Path to the PEM certificate used by the TCP server.
@@ -1030,6 +1055,9 @@ mod tests {
             // TCP Response Stream
             tcp_response_stream::DYN_TCP_RESPONSE_STREAM_PORT,
             tcp_response_stream::DYN_TCP_RESPONSE_STREAM_HOST,
+            tcp_response_stream::DYN_TCP_RESPONSE_STREAM_BACKLOG,
+            tcp_response_stream::DYN_TCP_RESPONSE_CONNECT_TIMEOUT,
+            tcp_response_stream::DYN_TCP_RESPONSE_CONNECT_RETRY_LIMIT,
             tcp_response_stream::tls::DYN_TCP_TLS_CERT_PATH,
             tcp_response_stream::tls::DYN_TCP_TLS_KEY_PATH,
             tcp_response_stream::tls::DYN_TCP_TLS_CA_CERT_PATH,

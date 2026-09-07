@@ -762,6 +762,47 @@ async fn handle_accept_error(err: &std::io::Error, backoff: &mut AcceptBackoff) 
 type BoxRead = Box<dyn tokio::io::AsyncRead + Unpin + Send>;
 type BoxWrite = Box<dyn tokio::io::AsyncWrite + Unpin + Send>;
 
+/// `listen()` backlog for the CallHome listener, from `DYN_TCP_RESPONSE_STREAM_BACKLOG`.
+///
+/// 4096 rather than the 128 `tokio::net::TcpListener::bind` hardcodes (mio's default,
+/// matching std). Every ingress dials a fresh response-stream connection per request,
+/// so this listener is hit at request rate; at 128 the completed-handshake queue
+/// overflows under load and the kernel drops SYNs silently, which the dialer
+/// experiences as a `connect()` that hangs until its own SYN retries expire rather
+/// than as a refusal. The kernel still clamps this to `net.core.somaxconn`.
+fn response_stream_backlog() -> i32 {
+    const DEFAULT_BACKLOG: i32 = 4096;
+    std::env::var(crate::config::environment_names::tcp_response_stream::DYN_TCP_RESPONSE_STREAM_BACKLOG)
+        .ok()
+        .and_then(|v| v.parse::<i32>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(DEFAULT_BACKLOG)
+}
+
+/// Bind a listener with an explicit backlog.
+///
+/// `tokio::net::TcpListener::bind` gives no way to set the backlog, so the socket is
+/// built through socket2 and handed to tokio afterwards.
+async fn bind_with_backlog(addr: &str) -> std::io::Result<tokio::net::TcpListener> {
+    let backlog = response_stream_backlog();
+    let sock_addr: SocketAddr = tokio::net::lookup_host(addr).await?.next().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("no socket address resolved for {addr}"),
+        )
+    })?;
+    let domain = Domain::for_address(sock_addr);
+    let socket = Socket::new(domain, Type::STREAM, None)?;
+    // Matches what mio sets for its own listeners, so restarts do not trip over
+    // lingering TIME_WAIT sockets on a fixed port.
+    socket.set_reuse_address(true)?;
+    socket.set_nonblocking(true)?;
+    socket.bind(&SockAddr::from(sock_addr))?;
+    socket.listen(backlog)?;
+    tracing::debug!(%addr, backlog, "CallHome listener bound");
+    tokio::net::TcpListener::from_std(std::net::TcpListener::from(socket))
+}
+
 // this method listens on a tcp port for incoming connections
 // new connections are expected to send a protocol specific handshake
 // for us to determine the subject they are interested in, in this case,
@@ -774,7 +815,7 @@ async fn tcp_listener(
     tls_acceptor: Option<TlsAcceptor>,
     read_tx: tokio::sync::oneshot::Sender<Result<u16>>,
 ) -> Result<()> {
-    let listener = tokio::net::TcpListener::bind(&addr)
+    let listener = bind_with_backlog(&addr)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to start TcpListender on {}: {}", addr, e));
 
