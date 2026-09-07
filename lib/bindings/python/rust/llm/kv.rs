@@ -43,7 +43,7 @@ use dynamo_kv_router::services::selection::{
 use dynamo_kv_router::services::slot_tracker::{self, SlotTrackerConfig};
 #[cfg(feature = "select-service")]
 use dynamo_kv_router::{TrackingHashAlgorithm, WorkerType};
-use rs::pipeline::{AsyncEngine, SingleIn};
+use rs::pipeline::{AsyncEngine, AsyncEngineContextProvider, SingleIn};
 use rs::protocols::annotated::Annotated as RsAnnotated;
 use tracing;
 
@@ -2108,6 +2108,7 @@ impl KvRouter {
     ) -> PyResult<Bound<'p, PyAny>> {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let single_in = SingleIn::new(request);
+            let ctx = single_in.context();
             let stream = inner.generate(single_in).await.map_err(to_pyerr)?;
             let (tx, rx) =
                 tokio::sync::mpsc::channel::<RsAnnotated<PyObject>>(response_buffer_size);
@@ -2117,7 +2118,34 @@ impl KvRouter {
                 let mut first_item = true;
                 let mut first_token_gauges_observed = false;
 
-                while let Some(mut response) = stream.next().await {
+                loop {
+                    // Watch for the consumer going away alongside the next chunk, not
+                    // only when sending one. Python holds just `rx` -- no Drop impl, no
+                    // aclose -- so closing the caller's generator is invisible here
+                    // until `tx.send` reports it. For a request that has not produced a
+                    // chunk yet (queued behind a full engine, or parked on a pause) the
+                    // wait for that send is unbounded: the engine keeps the request
+                    // alive and generates a full response nobody will read, which both
+                    // holds its rid registered -- so a retry reusing that id collides --
+                    // and spends decode capacity during the overload that caused the
+                    // cancellation. Selecting on `closed()` makes the detection
+                    // immediate instead of chunk-paced.
+                    let mut response = tokio::select! {
+                        biased;
+                        _ = tx.closed() => {
+                            tracing::debug!(
+                                request_id = %ctx.id(),
+                                "response consumer dropped; stopping generation"
+                            );
+                            ctx.stop_generating();
+                            break;
+                        }
+                        next = stream.next() => match next {
+                            Some(response) => response,
+                            None => break,
+                        },
+                    };
+
                     if first_item {
                         first_item = false;
                         if let (Some(tracker), Some(data)) = (&tracker, &mut response.data) {
@@ -2157,6 +2185,8 @@ impl KvRouter {
                     let is_error = response.is_error();
 
                     if tx.send(response).await.is_err() {
+                        // Lost the race with `closed()` above; same remedy.
+                        ctx.stop_generating();
                         break;
                     }
                     if is_error {
