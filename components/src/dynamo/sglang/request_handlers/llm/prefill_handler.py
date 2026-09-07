@@ -84,7 +84,13 @@ class PrefillWorkerHandler(BaseWorkerHandler):
             Bootstrap info dict with host, port, and room for decode worker connection.
         """
         logging.debug(f"New Request ID: {context.id()}")
-        trace_id = context.trace_id
+        trace_id = (
+            ((request.get("extra_args") or {}).get("dynamo_metadata") or {}).get(
+                "rollout-id"
+            )
+            or context.metadata.get("rollout-id")
+            or context.trace_id
+        )
 
         if "request" in request:
             # DisaggPreprocessedRequest format

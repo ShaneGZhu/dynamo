@@ -87,6 +87,33 @@ def _nvext_extra_field_requested(request: dict[str, Any], field: str) -> bool:
     return False
 
 
+def _attach_context_metadata(request: dict[str, Any], context: Any) -> None:
+    """Copy ``Context.metadata`` into ``extra_args`` so it survives this hop.
+
+    ``generate_from_request`` starts a new context, so metadata does not propagate to
+    the backend. ``extra_args`` is free-form JSON and is forwarded verbatim by
+    ``_wrap_preprocessed_request``, which makes a body copy the only channel that
+    crosses this router.
+
+    Copies every key rather than only the one consumer known today, so a new
+    ``x-dynamo-meta-*`` header needs no second patch here.
+
+    Never raises: losing the metadata degrades a downstream feature, while failing
+    the request loses a trajectory.
+    """
+    try:
+        metadata = context.metadata.copy()
+    except Exception:
+        return
+    if not metadata:
+        return
+    extra_args = request.get("extra_args")
+    if not isinstance(extra_args, dict):
+        extra_args = {}
+    extra_args["dynamo_metadata"] = metadata
+    request["extra_args"] = extra_args
+
+
 def _wrap_preprocessed_request(request: dict[str, Any]) -> dict[str, Any]:
     # Duplicated from dynamo.router/__main__.py since neither package exports
     # it. TODO(idhanani): file follow-up to lift this into dynamo.router as a
@@ -185,11 +212,12 @@ class ThunderAgentRouterHandler:
             self._capacity.stop()
         logger.info("ThunderAgent Router shutdown complete")
 
-    async def generate(self, request: dict[str, Any]):
+    async def generate(self, request: dict[str, Any], context):
         if self._scheduler is None or self._kv_router is None:
             raise RuntimeError(
                 "ThunderAgentRouterHandler used before initialize() was called"
             )
+        _attach_context_metadata(request, context)
         program_id = _extract_program_id(request)
         want_route_proof = _nvext_extra_field_requested(request, "engine_data")
         self._stat_requests_total += 1

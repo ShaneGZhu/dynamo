@@ -541,7 +541,14 @@ class DecodeWorkerHandler(BaseWorkerHandler):
         native_request = build_native_generate_request(
             native_payload,
             input_ids=input_ids,
-            fallback_rid=context.trace_id or context.id(),
+            fallback_rid=(
+                ((request.get("extra_args") or {}).get("dynamo_metadata") or {}).get(
+                    "rollout-id"
+                )
+                or context.metadata.get("rollout-id")
+                or context.trace_id
+                or context.id()
+            ),
             priority=self._priority_kwargs(priority).get("priority"),
             bootstrap_host=bootstrap_info.get("bootstrap_host"),
             bootstrap_port=bootstrap_info.get("bootstrap_port"),
@@ -574,7 +581,13 @@ class DecodeWorkerHandler(BaseWorkerHandler):
         if self._first_token_source is not None:
             self._first_token_source.bind(context, routing.get("dp_rank"))
         _raise_if_conditional_disagg_bypass(request)
-        trace_id = context.trace_id
+        trace_id = (
+            ((request.get("extra_args") or {}).get("dynamo_metadata") or {}).get(
+                "rollout-id"
+            )
+            or context.metadata.get("rollout-id")
+            or context.trace_id
+        )
         input_param = self._get_input_param(request)
         priority = (request.get("routing") or {}).get("priority")
         native_payload = native_generate_payload(request)
