@@ -1134,6 +1134,31 @@ class BaseWorkerHandler(LoraMixin, BaseGenerativeHandler[RequestT, ResponseT]):
 
         return bootstrap_host, bootstrap_port
 
+    def _abort_engine_request(self, sglang_request_id: str, reason: str) -> None:
+        """Ask SGLang to drop `sglang_request_id`. Never raises.
+
+        Safe to call for a request that already finished: SGLang's `abort_request`
+        returns early when the rid is no longer in `rid_to_state`, and a completed
+        request is removed from that map before its final chunk is yielded.
+
+        Guarded on `engine` because encode-only workers construct
+        `BaseWorkerHandler` with `engine=None`.
+        """
+        engine = getattr(self, "engine", None)
+        tokenizer_manager = getattr(engine, "tokenizer_manager", None)
+        if tokenizer_manager is None:
+            logging.error(
+                f"SGLang tokenizer_manager not found for abort request ({reason}): {sglang_request_id}"
+            )
+            return
+        try:
+            tokenizer_manager.abort_request(rid=sglang_request_id, abort_all=False)
+            logging.info(f"Aborted SGLang Request ID {sglang_request_id} ({reason})")
+        except Exception as exc:
+            logging.warning(
+                f"abort_request failed for {sglang_request_id} ({reason}): {exc}"
+            )
+
     async def _handle_cancellation(
         self, request_id_future: asyncio.Future, context: Context
     ):
@@ -1189,34 +1214,34 @@ class BaseWorkerHandler(LoraMixin, BaseGenerativeHandler[RequestT, ResponseT]):
             )
 
             # Call abort_request on the tokenizer_manager through the engine
-            if (
-                hasattr(self.engine, "tokenizer_manager")
-                and self.engine.tokenizer_manager
-            ):
-                logging.info(
-                    f"Calling SGLang abort_request for Request ID {sglang_request_id}"
-                )
-                self.engine.tokenizer_manager.abort_request(
-                    rid=sglang_request_id, abort_all=False
-                )
-                logging.info(f"Aborted Request ID: {context.id()}")
-            else:
-                logging.error(
-                    f"SGLang tokenizer_manager not found for abort request: {context.id()}"
-                )
+            self._abort_engine_request(sglang_request_id, "cancellation signal")
 
             # Check which event triggered and raise EngineShutdown if shutdown
             if shutdown_task and shutdown_task in done:
                 raise EngineShutdown("Engine was shut down during token generation")
 
         except asyncio.CancelledError:
-            # Task was cancelled, which is expected when generation completes
+            # Two causes reach here and they are indistinguishable: the context
+            # manager cancels this task on normal completion, and it also cancels it
+            # when the response generator is closed early -- client disconnect,
+            # frontend cancellation, or a reset response-stream socket, all of which
+            # land as `context.kill()` without ever signalling `cancellation_future`.
+            #
+            # In the early-close case the request is still registered in SGLang's
+            # `rid_to_state` and still decoding, so the next attempt carrying the same
+            # rollout id fails with "Duplicate request ID detected" while the original
+            # keeps burning decode slots. Aborting here is the only place that covers
+            # it: the signalled path above never runs.
+            #
+            # Unconditional abort is safe -- see `_abort_engine_request`.
             request_id = "unknown"
             if request_id_future.done() and not request_id_future.cancelled():
                 try:
                     request_id = request_id_future.result()
                 except Exception:
                     pass
+            if request_id != "unknown":
+                self._abort_engine_request(request_id, "monitor cancelled")
             logging.debug(
                 f"Cancellation monitor task cancelled for SGLang Request ID {request_id}, Context: {context.id()}"
             )
