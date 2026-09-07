@@ -121,6 +121,8 @@ pub mod test_utils;
 
 use super::ControlMessage;
 use serde::{Deserialize, Serialize};
+use socket2::{Domain, SockAddr, Socket, Type};
+use std::net::SocketAddr;
 
 #[allow(unused_imports)]
 use super::{
@@ -129,6 +131,34 @@ use super::{
 };
 
 const TCP_TRANSPORT: &str = "tcp_server";
+
+/// Bind a TCP listener with an explicit `listen()` backlog.
+///
+/// `tokio::net::TcpListener::bind` hardcodes a backlog of 128 (mio's default, matching
+/// std) and offers no way to change it, so the socket is built through socket2 and handed
+/// to tokio afterwards. The kernel still clamps the value to `net.core.somaxconn`.
+///
+/// The backlog is the depth of the queue of connections that have completed their
+/// handshake but have not yet been `accept()`ed, so it only matters for listeners that
+/// are hit in bursts wider than the acceptor can drain. When that queue is full and
+/// `net.ipv4.tcp_abort_on_overflow` is 0 (the default) the kernel silently drops the
+/// client's final ACK: the client is not refused, it sits in `connect()` retransmitting
+/// until its own SYN retry budget expires (~127s on Linux defaults). An overflow
+/// therefore surfaces as multi-second latency with nothing logged on either side, and is
+/// only visible as a rising `TcpExtListenOverflows`.
+pub async fn bind_listener_with_backlog(
+    addr: SocketAddr,
+    backlog: i32,
+) -> std::io::Result<tokio::net::TcpListener> {
+    let socket = Socket::new(Domain::for_address(addr), Type::STREAM, None)?;
+    // Matches what mio sets for its own listeners, so a restart does not trip over
+    // lingering TIME_WAIT sockets on a fixed port.
+    socket.set_reuse_address(true)?;
+    socket.set_nonblocking(true)?;
+    socket.bind(&SockAddr::from(addr))?;
+    socket.listen(backlog)?;
+    tokio::net::TcpListener::from_std(std::net::TcpListener::from(socket))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TcpStreamConnectionInfo {

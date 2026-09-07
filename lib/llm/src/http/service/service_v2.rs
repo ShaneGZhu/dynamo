@@ -39,6 +39,7 @@ use dynamo_runtime::config::env_is_truthy;
 use dynamo_runtime::config::environment_names::llm as env_llm;
 use dynamo_runtime::discovery::Discovery;
 use dynamo_runtime::logging::{make_inference_request_span, make_system_request_span};
+use dynamo_runtime::pipeline::network::tcp::bind_listener_with_backlog;
 use dynamo_runtime::metrics::{
     frontend_perf::ensure_frontend_perf_metrics_registered_prometheus,
     request_plane::ensure_request_plane_metrics_registered_prometheus,
@@ -899,7 +900,8 @@ impl HttpService {
                     let addr: SocketAddr = address
                         .parse()
                         .map_err(|e| anyhow::anyhow!("Invalid address '{}': {}", address, e))?;
-                    tokio::net::TcpListener::bind(addr).await.map_err(|e| {
+                    let backlog = http_listen_backlog();
+                    bind_listener_with_backlog(addr, backlog).await.map_err(|e| {
                         tracing::error!(
                             protocol = %protocol,
                             address = %address,
@@ -919,7 +921,7 @@ impl HttpService {
                                 e
                             ),
                         }
-                    })?
+                    }).inspect(|_| tracing::info!(address = %address, backlog, "HTTP listener bound"))?
                 }
             };
 
@@ -1022,6 +1024,21 @@ fn get_graceful_shutdown_timeout() -> usize {
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(5)
+}
+
+/// `listen()` backlog for the HTTP listener, from `DYN_HTTP_LISTEN_BACKLOG`.
+///
+/// 4096 rather than the 128 `tokio::net::TcpListener::bind` hardcodes. The frontend is
+/// the entry point for clients that open their whole batch at once, so the burst width
+/// is set by the client's concurrency, not by the frontend's accept rate. The kernel
+/// clamps this to `net.core.somaxconn`.
+fn http_listen_backlog() -> i32 {
+    const DEFAULT_BACKLOG: i32 = 4096;
+    std::env::var(env_llm::DYN_HTTP_LISTEN_BACKLOG)
+        .ok()
+        .and_then(|s| s.parse::<i32>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(DEFAULT_BACKLOG)
 }
 
 /// Environment variable to set the metrics endpoint path (default: `/metrics`)

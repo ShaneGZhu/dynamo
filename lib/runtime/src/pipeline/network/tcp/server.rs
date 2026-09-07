@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use socket2::{Domain, SockAddr, SockRef, Socket, Type};
+use socket2::SockRef;
 use std::{
     collections::{HashMap, HashSet},
     net::{IpAddr, SocketAddr, TcpListener},
@@ -779,10 +779,7 @@ fn response_stream_backlog() -> i32 {
         .unwrap_or(DEFAULT_BACKLOG)
 }
 
-/// Bind a listener with an explicit backlog.
-///
-/// `tokio::net::TcpListener::bind` gives no way to set the backlog, so the socket is
-/// built through socket2 and handed to tokio afterwards.
+/// Resolve `addr` and bind the CallHome listener with the configured backlog.
 async fn bind_with_backlog(addr: &str) -> std::io::Result<tokio::net::TcpListener> {
     let backlog = response_stream_backlog();
     let sock_addr: SocketAddr = tokio::net::lookup_host(addr).await?.next().ok_or_else(|| {
@@ -791,16 +788,9 @@ async fn bind_with_backlog(addr: &str) -> std::io::Result<tokio::net::TcpListene
             format!("no socket address resolved for {addr}"),
         )
     })?;
-    let domain = Domain::for_address(sock_addr);
-    let socket = Socket::new(domain, Type::STREAM, None)?;
-    // Matches what mio sets for its own listeners, so restarts do not trip over
-    // lingering TIME_WAIT sockets on a fixed port.
-    socket.set_reuse_address(true)?;
-    socket.set_nonblocking(true)?;
-    socket.bind(&SockAddr::from(sock_addr))?;
-    socket.listen(backlog)?;
+    let listener = super::bind_listener_with_backlog(sock_addr, backlog).await?;
     tracing::debug!(%addr, backlog, "CallHome listener bound");
-    tokio::net::TcpListener::from_std(std::net::TcpListener::from(socket))
+    Ok(listener)
 }
 
 // this method listens on a tcp port for incoming connections

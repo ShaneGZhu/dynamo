@@ -322,6 +322,18 @@ pub mod llm {
     pub const DYN_HTTP_GRACEFUL_SHUTDOWN_TIMEOUT_SECS: &str =
         "DYN_HTTP_GRACEFUL_SHUTDOWN_TIMEOUT_SECS";
 
+    /// `listen()` backlog for the frontend HTTP listener, i.e. how many connections may
+    /// sit completed-but-not-yet-`accept()`ed. Defaults to 4096; TLS mode ignores it
+    /// because `axum_server::bind_rustls` owns its own bind.
+    ///
+    /// `tokio::net::TcpListener::bind` hardcodes 128. A client that opens N connections
+    /// at once — an RL rollout step releasing its whole batch, or any fan-out client —
+    /// presents all N handshakes before axum can accept the first few, so at 128 the
+    /// remainder overflow. With `net.ipv4.tcp_abort_on_overflow` at its default 0 the
+    /// kernel drops the client's ACK instead of refusing it, so this costs seconds of
+    /// SYN-retransmit latency per affected request and logs nothing on either side.
+    pub const DYN_HTTP_LISTEN_BACKLOG: &str = "DYN_HTTP_LISTEN_BACKLOG";
+
     /// HTTP status code returned when the frontend rejects a request because
     /// all workers are overloaded. Defaults to 529 ("Site is overloaded"); set
     /// to 503 for Service Unavailable retry semantics. Status codes from 200
@@ -976,6 +988,7 @@ mod tests {
             // LLM
             llm::DYN_HTTP_BODY_LIMIT_MB,
             llm::DYN_HTTP_GRACEFUL_SHUTDOWN_TIMEOUT_SECS,
+            llm::DYN_HTTP_LISTEN_BACKLOG,
             llm::DYN_HTTP_OVERLOAD_STATUS_CODE,
             llm::DYN_HTTP_BACKEND_STREAM_TIMEOUT_SECS,
             llm::DYN_HTTP_PRE_COMMIT_ERROR_PEEK_MS,
