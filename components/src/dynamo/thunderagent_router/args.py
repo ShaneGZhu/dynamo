@@ -50,6 +50,7 @@ class ThunderAgentRouterConfig(DynamoRouterConfig):
             acting_token_weight=self.acting_token_weight,
             acting_decay_tau_seconds=self.acting_decay_tau_seconds,
             scheduler_interval_seconds=self.scheduler_interval_seconds,
+            program_idle_ttl_seconds=self.program_idle_ttl_seconds,
         )
 
     def validate(self) -> None:  # type: ignore[override]
@@ -127,6 +128,18 @@ class ThunderAgentArgGroup(ArgGroup):
             default=1800.0,
             help="Maximum wait on a paused program before a forced resume "
             "(default: 1800)",
+            arg_type=float,
+        )
+        add_argument(
+            g,
+            flag_name="--program-idle-ttl-seconds",
+            env_var="DYN_THUNDERAGENT_PROGRAM_IDLE_TTL_SECONDS",
+            default=0.0,
+            help="Release a program whose last turn ended this long ago; 0 disables. "
+            "Bounds the table when a client never sends session_final (crashed, or a "
+            "trajectory wedged on a response that never comes). Must exceed the longest "
+            "legitimate gap between turns or live programs lose their sticky pin "
+            "(default: 0)",
             arg_type=float,
         )
         add_argument(

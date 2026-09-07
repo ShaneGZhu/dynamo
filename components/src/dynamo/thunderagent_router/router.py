@@ -70,6 +70,13 @@ class ThunderAgentConfig:
     acting_token_weight: float = 1.0
     acting_decay_tau_seconds: float = 1.0
     buffer_per_program: int = 100
+    # 0 disables. Reaps programs whose last turn ended more than this long ago, which
+    # is the "idle expiry" the design doc names as the missing bound on program
+    # bookkeeping. Measured cost of not having it: with ~12k leaked programs the 2048
+    # ramp lost 20% throughput and p95 rose 56%, and both recovered on a TA restart.
+    # The cost is not the 5s tick (0.6% of a core even at 12k) but _replica_usage_locked
+    # scanning the whole table on every admission while holding self._lock.
+    program_idle_ttl_seconds: float = 0.0
 
 
 @dataclass
@@ -94,6 +101,7 @@ class ThunderAgentScheduler:
         self._scheduler_task: Optional[asyncio.Task] = None
         self._stat_forced_resumes = 0
         self._stat_programs_created = 0
+        self._stat_reaped_programs = 0
         self._stat_programs_ended = 0
         self._stat_requests_admitted = 0
         self._stat_requests_paused = 0
@@ -425,7 +433,56 @@ class ThunderAgentScheduler:
         except asyncio.CancelledError:
             return
 
+    def _reap_idle_programs_locked(self) -> int:
+        """Release programs whose last turn ended over ``program_idle_ttl_seconds`` ago.
+
+        Only ACTING programs are eligible: a REASONING one has a request in flight, and
+        ``acting_since`` is only refreshed by ``end_request``, so it is exactly "when did
+        this program last finish a turn".
+
+        A client that never sends ``session_final`` -- because it crashed, or because its
+        trajectory is wedged waiting on a response that will not come -- otherwise leaves
+        its program in the table for the lifetime of the router.
+
+        Caller holds self._lock.
+        """
+        ttl = self._cfg.program_idle_ttl_seconds
+        if ttl <= 0:
+            return 0
+        cutoff = time.monotonic() - ttl
+        stale = [
+            program_id
+            for program_id, program in self._table.programs.items()
+            if program.status == ProgramStatus.ACTING
+            and program.lifecycle != ProgramLifecycle.TERMINATED
+            and 0.0 < program.acting_since < cutoff
+        ]
+        for program_id in stale:
+            program = self._table.programs.get(program_id)
+            if program is None:
+                continue
+            program.lifecycle = ProgramLifecycle.TERMINATED
+            if program.waiting is not None:
+                program.waiting.set()
+                program.waiting = None
+            self._table.release(program_id)
+        if stale:
+            self._stat_reaped_programs += len(stale)
+            logger.info(
+                "thunderagent.reaped %d idle program(s) after %.0fs (total %d, remaining %d)",
+                len(stale),
+                ttl,
+                self._stat_reaped_programs,
+                len(self._table.programs),
+            )
+        return len(stale)
+
     async def _scheduler_tick(self) -> None:
+        # Before the capacity check on purpose: an empty snapshot must not stop the
+        # table from being bounded.
+        if self._cfg.program_idle_ttl_seconds > 0:
+            async with self._lock:
+                self._reap_idle_programs_locked()
         capacities = self._capacity.snapshot()
         if not capacities:
             return
@@ -829,6 +886,7 @@ class ThunderAgentScheduler:
                     "program_resumes_total": self._stat_resumes,
                     "programs_marked_for_pause_total": self._stat_marked_for_pause,
                     "forced_resumes_total": self._stat_forced_resumes,
+                    "reaped_programs_total": self._stat_reaped_programs,
                     "admissions_cancelled_total": self._stat_admissions_cancelled,
                     "worker_assignments_total": self._stat_worker_assignments,
                 },
