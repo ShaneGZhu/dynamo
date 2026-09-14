@@ -43,6 +43,10 @@ tabs:
   recipes:
     display-name: Recipes
     icon: file-code
+  agent-skills:
+    display-name: Agent Skills
+    icon: robot
+    slug: agent-skills
   reference:
     display-name: Reference
     icon: book
@@ -158,6 +162,8 @@ navigation:
             path: ../pages-dev/kubernetes/kv-aware-routing/overview.md
           - page: Using the Dynamo Frontend
             path: ../pages-dev/kubernetes/kv-aware-routing/dynamo-frontend.md
+          - page: Deploy the DC KV Relay (Experimental)
+            path: ../pages-dev/kubernetes/kv-aware-routing/kv-dc-relay.md
           - page: Using GAIE with Dynamo
             path: ../pages-dev/kubernetes/kv-aware-routing/gateway-api.mdx
           - page: Using GAIE with vanilla vLLM
@@ -282,6 +288,12 @@ navigation:
             path: ../pages-dev/cli/operations/lora-adapters.md
   - tab: developer-guide
     layout:
+      - section: Security
+        icon: shield-halved
+        collapsed: true
+        contents:
+          - page: Secure Deployment Guidelines
+            path: ../pages-dev/developer-guide/security/secure-deployment-guidelines.md
       # ==================== Knowledge Base ====================
       - section: Knowledge Base
         icon: book-open
@@ -435,7 +447,7 @@ navigation:
                         path: ../pages-dev/developer-guide/knowledge-base/modular-components/router/topology-aware-kv-transfer.md
                       - page: Offloading Support Matrix
                         path: ../pages-dev/developer-guide/knowledge-base/modular-components/router/offloading-support-matrix.md
-                      - page: Multi-DC KV Routing (Experimental)
+                      - page: DC KV Relay Concepts (Experimental)
                         slug: multi-dc-kv-routing
                         path: ../pages-dev/developer-guide/knowledge-base/modular-components/router/multi-dc-kv-routing.md
                   - section: Standalone Services
@@ -466,6 +478,8 @@ navigation:
                 contents:
                   - page: Overview
                     path: ../pages-dev/developer-guide/knowledge-base/modular-components/planner/overview.md
+                  - page: Choose a Planner Mode
+                    path: ../pages-dev/developer-guide/knowledge-base/modular-components/planner/choose-planner-mode.md
                   - page: Planner Guide
                     path: ../pages-dev/developer-guide/knowledge-base/modular-components/planner/planner-guide.md
                   - page: Global Planner Guide
@@ -524,6 +538,11 @@ navigation:
                       - page: Multimodal
                         slug: tensorrt-llm-multimodal
                         path: ../pages-dev/developer-guide/knowledge-base/modular-components/backends/tensorrt-llm/multimodal.md
+                  - section: Triton
+                    collapsed: true
+                    contents:
+                      - page: Overview
+                        path: ../pages-dev/developer-guide/knowledge-base/modular-components/backends/triton/overview.md
                   - section: vLLM
                     collapsed: true
                     contents:
@@ -744,12 +763,21 @@ navigation:
           - page: Overview
             path: ../pages-dev/recipes/model-recipes/overview.mdx
             slug: browse
+          - page: Gemma-4-31B
+            path: ../pages-dev/recipes/model-recipes/gemma-4-31b.mdx
+            slug: gemma-4-31b
+          - page: DeepSeek-V4.1-Flash
+            path: ../pages-dev/recipes/model-recipes/deepseek-v4-1-flash.mdx
+            slug: deepseek-v4-1-flash
           - page: GLM-5.3-Flash
             path: ../pages-dev/recipes/model-recipes/glm-5-3-flash.mdx
             slug: glm-5-3-flash
           - page: Kimi-K3
             path: ../pages-dev/recipes/model-recipes/kimi-k3.mdx
             slug: kimi-k3
+          - page: Qwen3.8-Flash-Next
+            path: ../pages-dev/recipes/model-recipes/qwen-3-8-flash-next.mdx
+            slug: qwen-3-8-flash-next
           - page: Qwen3.8-2.4T-A95B
             path: ../pages-dev/recipes/model-recipes/qwen-3-8-2-4t-a95b-fp8.mdx
             slug: qwen-3-8-2-4t-a95b-fp8
@@ -777,6 +805,9 @@ navigation:
           - page: DeepSeek-V4-Pro
             path: ../pages-dev/recipes/model-recipes/deepseek-v4-pro.mdx
             slug: deepseek-v4-pro
+          - page: DeepSeek-V4-Pro-0813
+            path: ../pages-dev/recipes/model-recipes/deepseek-v4-pro-0813.mdx
+            slug: deepseek-v4-pro-0813
           - page: DeepSeek-V4-Flash
             path: ../pages-dev/recipes/model-recipes/deepseek-v4-flash.mdx
             slug: deepseek-v4-flash
@@ -795,6 +826,9 @@ navigation:
           - page: Qwen3-32B FP8
             path: ../pages-dev/recipes/model-recipes/qwen3-32b-fp8.mdx
             slug: qwen3-32b-fp8
+          - page: Qwen3.6-35B-A3B
+            path: ../pages-dev/recipes/model-recipes/qwen3-6-35b-a3b.mdx
+            slug: qwen3-6-35b-a3b
       # ==================== Kubernetes Templates ====================
       - section: Kubernetes Templates
         icon: fa-brands fa-kubernetes
@@ -870,6 +904,25 @@ navigation:
             path: ../pages-dev/recipes/feature-benchmarks/kv-router-a-b-testing.md
             slug: kv-router-ab-testing
             hidden: true
+  # The tab slug preserves the published /dynamo/dev/agent-skills URL.
+  - tab: agent-skills
+    layout:
+      - page: Overview
+        icon: robot
+        path: ../pages-dev/agent-skills/overview.mdx
+        slug: overview
+      - page: Deployment and Operations
+        icon: screwdriver-wrench
+        path: ../pages-dev/agent-skills/deployment.mdx
+        slug: deployment
+      - page: Performance Optimization
+        icon: gauge-high
+        path: ../pages-dev/agent-skills/optimization.mdx
+        slug: optimization
+      - page: Development and Documentation
+        icon: code
+        path: ../pages-dev/agent-skills/development.mdx
+        slug: development
   - tab: reference
     layout:
       - page: Compatibility
@@ -920,10 +973,6 @@ navigation:
         icon: microchip
         path: ../pages-dev/reference/general/model-early-access-builds.mdx
         slug: model-early-access-builds
-      - page: Agent Skills
-        icon: robot
-        path: ../pages-dev/reference/general/agent-skills.mdx
-        slug: agent-skills
       - page: Examples
         icon: file-code
         path: ../pages-dev/reference/general/examples.md
@@ -1019,6 +1068,9 @@ navigation:
             path: ../pages-dev/reference/components/tls-configuration.mdx
           - page: Frontend Configuration
             path: ../pages-dev/reference/components/frontend-configuration.mdx
+          - page: Multi-Datacenter KV Relay Configuration
+            path: ../pages-dev/reference/components/kv-dc-relay-configuration.md
+            slug: dc-kv-relay-configuration
           - page: Planner Configuration
             path: ../pages-dev/reference/components/planner-configuration.mdx
           - page: Profiler Configuration
@@ -1069,6 +1121,8 @@ navigation:
             path: ../pages-dev/reference/observability/environment-variables.mdx
           - page: Metrics Catalog
             path: ../pages-dev/reference/observability/metrics-catalog.mdx
+          - page: OTLP Metrics Export
+            path: ../pages-dev/reference/observability/otlp-metrics-export.mdx
           - page: Metrics Comparison
             path: ../pages-dev/reference/observability/metrics-comparison.md
           - page: Metric Labels
@@ -1084,12 +1138,12 @@ navigation:
         contents:
           - page: Overview
             path: ../pages-dev/reference/nixl-connect/overview.mdx
-      # The Dynamo release artifacts eligible for NVIDIA Enterprise Support.
+      # The Dynamo release artifacts eligible for enterprise support.
       # Same binaries as the open-source artifacts; the -enterprise suffix
       # marks the curated publication channel and the commercial support
       # boundary. Commercial support requires an NVIDIA AI Enterprise
       # subscription; the artifacts are free to download and run.
-      - section: Enterprise
+      - section: Enterprise Support
         icon: badge-check
         slug: enterprise
         collapsed: true
